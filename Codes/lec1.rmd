@@ -1,0 +1,159 @@
+---
+title: "Lecture 1"
+author: "Han Zhang"
+date: "2/1/2021"
+output: pdf_document
+---
+# create population
+For learning purposes, we generate a pseudo population. 
+The population is 100,000 units following Beta distribution.
+
+Note that the population distribution is not Normal.
+
+Note that in real life, you don't observe the population. 
+Here we assume we know them.
+It's a common way to learn about statistics and design methods.
+
+```{r}
+population <- rbeta (100000, 1, 2)
+plot (density (population))
+# population mean
+mean(population)
+# population variance
+var(population)
+
+```
+
+# create sample
+We create *one* survey of 1000 sampled observations from the population.
+
+
+We calculated sample mean $\bar{X}$ and $\hat{V}(X)$
+Compare these estimates with population quantities. What do you find?
+
+```{r}
+sample = sample(population, size = 1000)
+plot (density (sample))
+# sample mean as estimator of population mean
+est.mean = mean(sample)
+
+# unbiased estimator of population variance
+est.var = 1000/(1000-1) * var(sample)
+
+```
+
+# Normally-approximated confidence intervals
+
+First we need to estimate standard error of the sample mean
+
+We know it is
+
+$\hat{V}(\bar{X}) = \frac{\hat{V}(X)}{n}$. We have calculated $\hat{V}(X)$ in the previous code chunk.
+
+```{r}
+sample_mean = mean(sample)
+
+#standard error of the sample mean
+ss = sqrt(est.var/1000)
+
+print ("point estimate of mean")
+print (sample_mean)
+print ("95% normal-approximated confidence interval of mean")
+c(sample_mean - 1.96 * ss, sample_mean + 1.96 * ss)
+
+```
+
+
+# Law of Large Numbers
+We vary the size of survey, from 100 to 100000, with an interval of 1000.
+
+In other words, $n$ changes from 100, 500, 1100, 1600, 2100, and so on.
+
+As the plot shows, when $n$ increases, sample mean approaches population mean.
+
+```{r}
+survey_mean_list  <- c()
+survey_times <- seq(100, 100000, 500)
+for (n in survey_times ){
+  survey <- sample(population, size = n, replace = F)
+  survey_mean_list  <- c(survey_mean_list , mean(survey))
+}
+
+plot(survey_times, survey_mean_list , xlab = "number of samples", ylab = "sample mean")
+abline(h = mean(population), col = "red")
+```
+
+#  Central limit theorem
+
+This time, we let survey size to be fixed at 1000.
+
+We explore three cases:
+- case 1: we create 10 surveys, each of size 1000, from the population. Plot color is red.
+- case 2: we create 100 surveys, each of size 1000, from the population. Plot color is green.
+- case 3: we create 1000 surveys, each of size 1000, from the population. Plot color is blue.
+
+
+- As $n$ increases, distribution of sample means approaches normal
+
+```{r}
+
+# Now we show the central limit theorem
+survey_times <- c(10,  10000)
+col <- c("red",  "blue") #"green",
+i = 1
+for (n in survey_times ){
+  print (n)
+  # central limit theorem talks about distribution of the sample mean
+  # we cannot calculate the distribution for a single survey, so we draw sample multiple times
+  survey_mean_list <- c()
+  for (m in 1:n)
+  {
+    survey <- sample(population, size = 1000, replace = TRUE)
+    survey_mean_list <- c(survey_mean_list, mean(survey))
+  }
+  # sample_mean_list_standard <- survey_mean_list  - mean(population)
+  plot(density (survey_mean_list),  col = col[i], xlim = c(0.3, 0.38), ylim  = c(0,60), xlab = "")
+  abline(v = mean(population), col = "black")
+  par(new = T)
+  i = i  + 1
+}
+
+
+```
+
+
+## bootstrap confidence interval for sample mean
+
+Bootstrap is slower, but needs no Central Limit Theorem.
+
+NOTE: sample *with* replacement is the key
+
+```{r}
+print (length(sample))
+bootstrap_means = c() # store bootstrapped means
+for (i in 1:100){
+  # resample from the sample with replacement
+  boot_data <- sample(sample, length(sample), replace = T)
+  boot_mean <- mean(boot_data)
+  bootstrap_means <- c(bootstrap_means, boot_mean)
+}
+
+# then simple quantile function to 
+print ("point estimate of mean")
+print (sample_mean)
+
+
+print ("normal confidence interval")
+print (c(sample_mean - 1.96 * ss, sample_mean + 1.96 * ss))
+
+print ("95% bootstrap confidence interval of mean")
+conf = quantile(bootstrap_means, c(0.025, 0.975))
+print (conf)
+plot(density(bootstrap_means), main = "confidence interval")
+abline(v = conf[1], col = "red")
+abline(v = conf[2], col = "red")
+abline(v = sample_mean - 1.96 * ss, col = "green")
+abline(v = sample_mean + 1.96 * ss, col = "green")
+
+
+```
