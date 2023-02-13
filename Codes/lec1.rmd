@@ -14,31 +14,33 @@ Note that in real life, you don't observe the population.
 Here we assume we know them.
 It's a common way to learn about statistics and design methods.
 
+$E(X) = mean(population)$
 ```{r}
 population <- rbeta (100000, 1, 2)
 plot (density (population))
 # population mean
-mean(population)
+mean(population) 
 # population variance
 var(population)
 
 ```
 
 # create sample
-We create *one* survey of 1000 sampled observations from the population.
 
+We create *one* survey of 1000 sampled observations from the population.
+$X_1,...,X_{1000}$
 
 We calculated sample mean $\bar{X}$ and $\hat{V}(X)$
 Compare these estimates with population quantities. What do you find?
 
 ```{r}
-sample = sample(population, size = 1000)
-plot (density (sample))
+survey = sample(population, size = 1000)
+plot (density (survey))
 # sample mean as estimator of population mean
-est.mean = mean(sample)
+est.mean = mean(survey)
 
 # unbiased estimator of population variance
-est.var = 1000/(1000-1) * var(sample)
+est.var = 1000/(1000-1) * var(survey)
 
 ```
 
@@ -51,7 +53,7 @@ We know it is
 $\hat{V}(\bar{X}) = \frac{\hat{V}(X)}{n}$. We have calculated $\hat{V}(X)$ in the previous code chunk.
 
 ```{r}
-sample_mean = mean(sample)
+sample_mean = mean(survey)
 
 #standard error of the sample mean
 ss = sqrt(est.var/1000)
@@ -89,11 +91,9 @@ This time, we let survey size to be fixed at 1000.
 
 We explore three cases:
 - case 1: we create 10 surveys, each of size 1000, from the population. Plot color is red.
-- case 2: we create 100 surveys, each of size 1000, from the population. Plot color is green.
-- case 3: we create 1000 surveys, each of size 1000, from the population. Plot color is blue.
+- case 2: we create 10000 surveys, each of size 1000, from the population. Plot color is blue.
 
 
-- As $n$ increases, distribution of sample means approaches normal
 
 ```{r}
 
@@ -131,9 +131,9 @@ NOTE: sample *with* replacement is the key
 ```{r}
 print (length(sample))
 bootstrap_means = c() # store bootstrapped means
-for (i in 1:100){
+for (i in 1:1000){
   # resample from the sample with replacement
-  boot_data <- sample(sample, length(sample), replace = T)
+  boot_data <- sample(survey, length(survey), replace = T)
   boot_mean <- mean(boot_data)
   bootstrap_means <- c(bootstrap_means, boot_mean)
 }
@@ -142,6 +142,8 @@ for (i in 1:100){
 print ("point estimate of mean")
 print (sample_mean)
 
+print ("point estimate of mean")
+print (mean(bootstrap_means))
 
 print ("normal confidence interval")
 print (c(sample_mean - 1.96 * ss, sample_mean + 1.96 * ss))
