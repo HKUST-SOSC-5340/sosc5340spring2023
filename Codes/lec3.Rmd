@@ -1,0 +1,644 @@
+---
+title: "SOSC 5340 Lecture 3"
+output: pdf_document
+---
+```{r}
+# load some required packages
+library(ggplot2)
+library(margins)
+library(ISLR)
+library(broom)
+library(lmtest)
+data(Wage)
+```
+
+# MLE by hand
+```{r}
+data =read.csv("MichelinNY.csv")
+l = glm(InMichelin ~ Service + Decor + Food + Price, data, family=binomial("logit"))
+d1 <- tidy(coeftest(l))
+d1$group <- "R default"
+```
+
+## MLE by hand
+
+We can use MLE to implement logistic regression estimations by hand
+```{r}
+
+# logit^{-1} (X \beta )
+invlogit = function(mX, vBeta) {
+  return(exp(mX %*% vBeta)/(1+ exp(mX %*% vBeta)) )
+}
+
+# log-likelihoood function
+
+logLikelihoodLogit = function(vBeta, mX, vY) {
+  return(- sum(
+    vY * log(  invlogit(mX, vBeta) ) + 
+      (1-vY)* log(1 - invlogit(mX, vBeta))
+  )
+  )
+}
+
+
+```
+
+Then use `optim` package to find $\beta$ that maximize log likelihood (or minimize negative log likelihood)
+```{r}
+vY = as.matrix(data['InMichelin'])
+mX = as.matrix(data.frame(`(Intercept)` = 1, data[c('Service','Decor', 'Food', 'Price')]))
+
+vBeta0 = rep(0, ncol(mX))
+  
+
+
+
+# optimize
+# report every 1 minute
+optimLogit <- optim(par = vBeta0, 
+                    fn = logLikelihoodLogit,
+                   mX = mX, vY = vY,
+                   method = "BFGS",
+                   hessian=TRUE, 
+                   control = list(maxit = 50000, trace = 2, REPORT = 1))
+# construct output
+coef = optimLogit$par  # coefficient
+coef.sd = sqrt(diag(solve(optimLogit$hessian))) # standard error
+tv  <- coef  / coef.sd # t-value
+## pt is a student-t distribution
+## the below line will be the correct way to calculate p-values if you are running linear regression
+## but I don't remember whether logistic regression's test statistics follow student-t
+d = data.frame(term = d1$term, "estimate" = coef,  "std.error" = coef.sd, "statistic" = tv,   check.names = FALSE)
+
+
+```
+
+
+
+compare the two estimates (default R and MLE by hand)
+```{r}
+
+d$group <- "MLE_by_hand"
+
+print (d1)
+print (d)
+```
+
+# marginal effects and predicted probabilities
+We are going to see whether health status is related to wage, education, and race
+
+```{r}
+l = glm(health ~ wage + education + race, data = Wage, family=binomial("logit"))
+summary(l)
+```
+
+
+
+
+
+
+
+## interpretation 3 (marginal effect)
+
+```{r}
+AME <- margins(l)
+AME
+
+MEM <- margins(l, at = list(wage = mean(Wage$education), race = mean(Wage$race)))
+MEM
+
+# Marginal effect at representive values
+MER <- margins(l, at = list(wage = c(100,200), education = c("2. HS Grad", "3. Some College")))
+MER
+
+```
+
+## Approach 4: plot predicted probability
+
+`cplot` is from `margins` package. By default, holding all other to be the constant and vary by focal variable
+
+
+```{r}
+cplot(l, "wage", what = "prediction", main = "Predicted probability")
+
+```
+
+```{r}
+## by default, holding all other to be the constant and vary by focal variable
+cplot(l, "race", what = "prediction", main = "Predicted probability")
+
+```
+
+
+`sjPlot` is another package that allows you to plot predicted probabilities more easily.
+Compared with `margins`, it is easier to plot the predicted probability while not holding others at the constant, which could be meaningless for categorical variables (e.g., race and education) 
+
+
+```{r}
+# use sjPlot
+library(sjPlot)
+plot_model(l, type = "pred", terms = c("wage", "education"), ci.lvl = NA )
+
+```
+
+## visualize interaction effects
+
+The marginal effect of wage on health vary by education; for less education population, wage's effect on health is particularily large; it is not so large for highly educated groups
+
+```{r}
+
+l2 = glm(health ~ wage + education * race, data = Wage, family=binomial())
+plot_model(l2, type = "pred", terms = c("wage", "education"))
+
+```
+
+
+## test
+
+
+---
+title: "Lecture 4"
+output: pdf_document
+---
+```{r}
+# load some required packages
+library(ggplot2)
+library(reshape2)
+library(nlme)
+library(ISLR)
+library(foreign)
+library(AER)
+library(MASS)
+library(tidyverse)
+library(ggplot2)
+library(knitr)
+library(boot)
+library(texreg)
+
+```
+
+
+# Multinominal and Ordered Logits
+
+## Ordered logits
+
+We will be using data from the World Values Surveys 1995-1997 for Australia, Norway, Sweden, and the United States from ‘carData’ package in R.
+
+Our outcome is :
+- Poverty is the multi-class ordered dependent variable with categories — ‘Too Little’, ‘About Right’ and ‘Too Much’. We have the following five independent variables
+
+Predictors are:
+
+Religion: member of a religion -no or yes
+Degree: held a university degree -no or yes
+Country: Australia, Norway, Sweden or the USA
+Age: age (years)
+Gender: male or female
+
+
+```{r}
+library(carData)
+data (WVS)
+head(WVS)
+
+```
+
+
+```{r}
+ordered_logit <- polr(poverty~religion+degree+country+age+gender, data = WVS, Hess = TRUE)
+summary(ordered_logit)
+```
+Intercepts here are just cut-offs
+
+
+This model returns no p-values. How can we perform hypothesis testing (e.g., regression coefficients are not zero?)
+
+This will be leave as an exercise
+
+## multinomial regressions
+
+
+The data set contains variables on 200 students. 
+
+- The outcome variable is prog, program type (general, vocation and academic)
+- The predictor variables are social economic status, ses, a three-level categorical variable and writing score, write, a continuous variable. 
+```{r}
+ml <- read.dta("https://stats.idre.ucla.edu/stat/data/hsbdemo.dta")
+```
+
+We run multinomial regression. The first category is used as the reference group, here general
+
+
+```{r}
+library(nnet)
+multinomial <- multinom(prog ~ ses + write, data = ml)
+summary(multinomial)
+```
+
+There are two sets of coefficients, for each category (leaving out the reference group).
+
+
+# Hypothesis Testing using Likelihood Ratio Test
+
+## Likelihood Ratio Test between two logistic regressions
+
+Examples are drawn from 
+
+https://data.princeton.edu/wws509/r/overdispersion
+
+THe data is from Long, J. Scott. 1990. The Origins of Sex Differences in Science. Social Forces. 68(3):1297-1316
+
+The outcome i the number of publications produced by Ph.D. biochemists to illustrate the application of Poisson, over-dispersed Poisson, negative binomial and zero-inflated Poisson models.
+
+
+
+
+- art: articles in last three years of Ph.D.
+
+THere are five predictors available:
+
+- fem:	coded one for females
+- mar:	coded one if married
+- kid5:	number of children under age six
+- phd:	prestige of Ph.D. program
+- ment:	articles by mentor in last three years
+
+
+First, compare variance and mean. Variance > mean which suggests sign of dispersion
+```{r cars}
+ab <- read.dta("http://www.stata-press.com/data/lf2/couart2.dta")
+mean(ab$art)
+var(ab$art)
+```
+
+Let us fit a simple Poisson model with all predictors
+
+```{r}
+mp <- glm(art~fem+mar+kid5+phd+ment, family=poisson, data=ab)
+summary(mp)
+```
+
+We test over-dispersion using Cameron and Trivedi's dispersion test.
+p value is very small, and we find support for using a model with dispersion parameter.
+```{r}
+dispersiontest(mp)
+```
+
+## now run some negative binomial models
+
+```{r pressure, echo=FALSE}
+mnb <- glm.nb(art~fem+mar+kid5+phd+ment, data=ab)
+summary(mnb)
+
+screenreg(list("Poisson" = mp, "Negative binomial" = mnb))
+```
+
+### use likelihood ratio test to compare Poisson and Negative Binomial regression fits
+we see that `glm()` does not automatically return log likelihood estimate, but do not worry, we can use `logLik()` to get it. 
+
+`glm.nb()` in MASS package is better since it directly gives us the 2* log L: -3121.917. But to illustrate, we also use `logLik` to get it.
+```{r}
+logL_null = logLik(mp)
+logL_alternative = logLik(mnb)
+print (logL_null)
+print (logL_alternative)
+
+```
+
+$D$ is the difference between two likelihoods *2, with degree of freedom of more complex model - simpler model.
+
+```{r}
+#D = 2*( as.numeric(logL_alternative) - as.numeric(logL_null))
+D = 2 *(logL_alternative - logL_null)
+D
+
+```
+
+What is the probability we observe $D$ less than the currently observed 180.196?
+
+```{r}
+1- pchisq(180.196, 1)
+```
+
+This means that the probability we observe $D$ equals to or larger than 180.196 is 0. 
+In other words, $D$ is very unlikely to be observed under the null hypothesis. It is more likely to be observed under the alternative hypothesis.
+
+Of course, we can do the above likelihood ratio test, using the `lrtest` model.
+It basically did exactly what we did under the hood, with some nicer formatting.
+```{r}
+lrtest (mp, mnb)
+```
+
+## We can not only do likelihood ratio test between models, we can also compare the same model with different predictors
+
+Let us run a simpler model with four predictors. 
+We do not want the phd prestige as predictor, because it is not statistically significant.
+
+(note: simpler model is always the null model in likelihood ratio test)
+```{r}
+mp0 <- glm(art~fem+mar+kid5 + ment , family=poisson, data=ab)
+summary(mp0)
+```
+
+Now compare the simpler model mp0 with four predictors, and complex model mp with five predictors
+```{r}
+lrtest(mp0, mp)
+```
+
+The likelihood ratio test suggests that you should indeed drop phd prestige as a predictor, or favoring the null model.
+
+This is the statistical way to do model selection.
+
+Of course, if you have theoretical reason to add phd prestige as an important predictor, you may well do so.
+
+## last, let us compare zero-inflated poission with negative binomial fit
+```{r}
+library(pscl)
+mzip <- zeroinfl(art~fem+mar+kid5+phd+ment, data=ab)
+summary(mzip)
+```
+
+You can see clearly the two-part model. Binomial basically models the excess zeros.
+
+Zero-inflated Poisson and NEgative Binomial differs too much: they are not a simpler version of the other.
+
+So we cannot directly use likelihood ratio test.
+
+We calculate AIC for two models
+```{r}
+AIC(mzip)
+# AIC of negative binomial is directly given by the model
+AIC_nb = 3135.9
+```
+
+- AIC of negative binomial is 3135.9
+- AIC of zero-inflated is 3233
+
+
+Negative binomial is the better model: smaller AIC.
+
+
+
+```{r}
+# load some required packages
+library(ggplot2)
+library(reshape2)
+library(nlme)
+library(ISLR)
+library(foreign)
+library(AER)
+library(MASS)
+library(tidyverse)
+library(ggplot2)
+library(knitr)
+library(boot)
+library(texreg)
+
+```
+
+
+# boostrapp
+```{r}
+set.seed(12345)
+
+anes <- read_delim("anes_timeseries_2016_rawdata.txt", delim = "|") %>%
+  select(vote = V162034a, V161270, gender = V161342, age = V161267) %>%
+  mutate_all(as.numeric) %>%
+  filter(vote %in% c(1,2) & gender %in% c(1,2)) %>%
+  mutate(vote = factor(vote, levels = 1:2, labels = c("Clinton", "Trump")),
+         educ = case_when(
+           V161270 %in% 1:8 ~ 1,
+           V161270 %in% 9 ~ 2,
+           V161270 %in% 10:12 ~ 3,
+           V161270 %in% 13 ~ 4,
+           V161270 %in% 14:16 ~ 5,
+           TRUE ~ -999),
+         gender = factor(gender, levels = 1:2, labels = c("Male", "Female"))) %>%
+  mutate(educ = factor(educ, level = 1:5, labels = c("HS Not Completed",
+                                                     "Completed HS",
+                                                     "College < 4 Years",
+                                                     "College 4 Year Degree",
+                                                     "Advanced Degree"))) %>%
+  filter(!is.na(educ) & age >= 18) %>%
+  dplyr::select(-V161270)
+
+trump_model <- glm(vote ~ gender + educ + age, data = anes, 
+                   family = binomial(link = "logit"))
+
+screenreg(trump_model)
+
+cis <- exp(confint(trump_model)) %>%
+  as.data.frame %>%
+  rownames_to_column("Variable")
+cis$OR = exp(coef(trump_model))
+
+ggplot(data = cis, aes(x = Variable, y = `OR`, ymin = `2.5 %`, ymax = `97.5 %`)) +
+  geom_pointrange() +
+  geom_hline(yintercept = 1, lty = 2) +
+  coord_flip() +
+  xlab("Variable") + ylab("Odds Ratio with 95% CI") 
+
+
+```
+
+### use package instead (which should use Delta method)
+
+It will return a normal-approximated confidence interval for odds-ratio
+
+```{r}
+sjPlot::plot_model(trump_model)
+```
+
+
+
+# Bootstrap
+
+We have estimated an logistic regression to see how health status is related to wage, education, and race in the last class.
+
+
+Now we use bootstrap methods to calculate the confidence interval (take wage as an example).
+The original data have 3000 observations.
+We take 1000 samples of the original data; each sample consists of 3000 observations.
+We have to allow with-replacement sampling; otherwise each sample is the original sample itself.
+
+
+```{r}
+logistic_estimate <- c()
+for (i in 1:1000){
+  # sample the same number
+  # ind <- sample (nrow(anes), size = nrow(anes), replace = TRUE)
+  anes_new = anes[sample (nrow(anes), size = nrow(anes), replace = TRUE), ]
+  
+  # estimate regression with the bootstrap sample 
+  
+  logistic_bootstrap = glm(vote ~ gender + educ + age, data = anes_new, 
+                   family = binomial(link = "logit"))
+  # save coefficient for wage
+  logistic_estimate = rbind(logistic_estimate, c(coef(logistic_bootstrap), exp(coef(logistic_bootstrap))))
+}
+
+```
+
+ calculate mean, standard errors, and confidence intervals
+
+```{r}
+# bootstrap estimate
+lower <- apply(logistic_estimate, 2, function(x)quantile(x, 0.025))
+
+upper <- apply(logistic_estimate, 2, function(x)quantile(x, 0.975))
+
+# average
+mu <- apply(logistic_estimate, 2, mean)
+
+# standard errors
+std.boot <- apply(logistic_estimate, 2, sd)
+print (std.boot)
+# 
+#
+cis.boot <- data.frame(Variable = cis$Variable, mean = mu, ymin = lower, ymax = upper)
+print (cis.boot)
+```
+
+
+We can also calcualte confidence interval of  based on bootstrap samples, and compare that with those returned by R
+
+```{r}
+# bootstrap estimate
+lower <- apply(logistic_estimate, 2, function(x)quantile(x, 0.025))
+upper <- apply(logistic_estimate, 2, function(x)quantile(x, 0.975))
+mu <- apply(logistic_estimate, 2, mean)
+
+cis.boot <- data.frame(Variable = cis$Variable, OR = mu, ymin = lower, ymax = upper)
+
+
+ggplot(data = cis.boot, aes(x = Variable, y = `OR`, ymin = lower, ymax = upper)) +
+  geom_pointrange() +
+  geom_hline(yintercept = 1, lty = 2) +
+  coord_flip() +
+  xlab("Variable") + ylab("Odds Ratio with 95% CI using Bootstrap") 
+
+
+
+```
+
+
+## Bootstrap for predicted probabilities
+
+Following the slide, let us say we are interested in the confidence interval for several predicted probabilities: the probability of being healty given wage = (50, 100, 150,200, 250,300) (in thousands), when education is 5. Advanced Degree and Race = "1. White"
+
+We have seen how to calculate predicted probability
+```{r}
+fixdata = data.frame(wage = c(50, 100, 150,200, 250, 300), education = "5. Advanced Degree", race = "1. White")
+# we directly add type = "response"; it outputs predicted probability directly, not log odds
+probability = predict(trump_model, fixdata, type = "response")
+plot(c(50, 100, 150,200, 250, 300), probability, type = "o")
+
+```
+
+What are the confidence intervals for this predicted probability?
+
+
+Assuming that our coefficient estimate for education = "5. Advanced Degree".
+And we want to see how varying coefficient for education = "5. Advanced Degree" gives  us different predicted probabilities.
+
+## calculate the confidence interval
+
+It is attempting to use the below equation to calculate the confidence interval for predicted probabilities
+
+$$\Big( \frac{\exp \left(X ( \hat{\beta} - 1.96 \hat{se} )\right)}{1+\exp \left(X (\hat{\beta} - 1.96 \hat{se})\right)}, \frac{\exp \left(X ( \hat{\beta} + 1.96 \hat{se} )\right)}{1+\exp \left(X (\hat{\beta} + 1.96 \hat{se})\right)} \Big)$$
+
+The lower and upper bound for education = "5. Advanced Degree" coefficient is (0.480799086 1.253334607)
+
+```{r}
+confint(logistic)
+```
+ 
+We just change the coefficient to 0.480799086 or 1.253334607, and recalculate predicted probabilities based on the above equation.
+
+To not mess up with the previous regression, we create a separate regression for this purpose.
+```{r}
+  logistic_new = glm(health ~ wage + education + race, data = Wage, family=binomial())
+  logistic_new$coefficients
+  # manually tweak the regression coefficients to be its lower bound
+  logistic_new$coefficients[6] <- 0.480799086
+logistic_new$coefficients
+   fixdata = data.frame(wage = c(50,100,150,200, 250, 300), education = "5. Advanced Degree", race = "1. White")
+  
+ probability_lower = predict(logistic_new, fixdata, type = "response")
+
+   # manually tweak the regression coefficients to be its uppwer bound
+  logistic_new$coefficients[6] <- 1.253334607
+logistic_new$coefficients
+   fixdata = data.frame(wage = c(50,100,150,200, 250, 300), education = "5. Advanced Degree", race = "1. White")
+  
+ probability_upper = predict(logistic_new, fixdata, type = "response")
+ 
+ 
+```
+
+And plot the predicted probabilities
+```{r}
+plot(c(50,100,150,200, 250, 300), ylim = c(0.6, 1), probability, type = "o")
+par(new = TRUE)
+plot(c(50,100,150,200, 250, 300), ylim = c(0.6, 1), probability_lower, type = "o", col = "grey")
+par(new = TRUE)
+plot(c(50,100,150,200, 250, 300), ylim = c(0.6, 1), probability_upper, type = "o", col = "grey")
+```
+
+Bootstrap gives a much better confidence interval estimates for these predicted probabilities.
+
+
+*This just cannot be right (especiall the upper bound)*
+
+### Now let us use  calculate the predicted probabilities using bootstrap.
+
+1. sample with replacement from the original sample
+2. calculate predicted probability 
+3. repeat this process 1000 times (or whatever number)
+4. use the quantiles to get estimates for predicted probabilities
+
+
+```{r}
+logistic_probs <- c()
+for (i in 1:1000){
+  # sample the same number
+  dat = Wage[sample (nrow(Wage), size = 3000, replace = TRUE), ]
+  # estimate regression with the bootstrap sample 
+  logistic_bootstrap = glm(health ~ wage + education + race, data = dat, family=binomial())
+  # save coefficient for wage
+  logistic_estimate = c(logistic_estimate, coef(logistic_bootstrap)[6])
+  
+  # calcualte new predicted probability with new sampled data
+  fixdata = data.frame(wage = c(50,100,150,200, 250, 300), education = "5. Advanced Degree", race = "1. White")
+ probability = predict(logistic_bootstrap, fixdata, type = "response")
+ logistic_probs = rbind(logistic_probs, probability)
+}
+
+colnames(logistic_probs) = c(50,100,150,200, 250, 300)
+head(logistic_probs)
+```
+
+
+
+Each row in `logistic_probs` is the predicted probability of  $Y$ = healty, given the respective wage value, and fixing education = "5. Advanced" and race = "white", for this sample of data
+
+
+We apply quantile function to each column (that is the $P(Y = healthy|wage = x, edu = "5. high". race = white))$) to get 95% confidence intervals.
+
+apply() in R basically runs the quantile function by columns (the second parameter is set to 2)
+
+```{r}
+bounds = apply(logistic_probs, 2, quantile, probs=c(0.025, 0.975))
+```
+
+and plot them alongside the original figure
+
+```{r}
+fixdata = data.frame(wage = c(50,100,150,200, 250, 300), education = "5. Advanced Degree", race = "1. White")
+probability = predict(logistic, fixdata, type = "response")
+plot(c(50,100,150,200, 250, 300), ylim = c(0.6, 1), probability, type = "o")
+par(new = TRUE)
+plot(c(50,100,150,200, 250, 300), ylim = c(0.6, 1), bounds[1,], type = "o", col = "grey")
+par(new = TRUE)
+plot(c(50,100,150,200, 250, 300), ylim = c(0.6, 1), bounds[2,], type = "o", col = "grey")
+```
